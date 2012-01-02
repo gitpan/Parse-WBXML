@@ -1,4 +1,10 @@
 Revision history for Parse-WBXML
 
+0.002     2012-01-02 08:19:41 Europe/London
+	Added some missing public IDs, several fixes around element and
+	attribute parsing, implemented initial termstr method for terminated
+	strings (incorrectly assumes \0 terminator but this is 'good enough'
+	for utf8 documents).
+
 0.001     2012-01-02 05:42:01 Europe/London
 	Initial CPAN release.

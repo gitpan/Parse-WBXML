@@ -5,14 +5,12 @@ META.yml
 Makefile.PL
 README
 dist.ini
+examples/dump-wbxml.pl
 lib/Parse/WBXML.pm
 t/00-pod.t
 t/00-use.t
 t/mb_encoding.t
 t/parse.t
-t/samples/wbxml/drmrel-001.wbxml
-t/samples/wbxml/drmrel-002.wbxml
-t/samples/wbxml/drmrel-003.wbxml
 t/samples/wbxml/emn-001.wbxml
 t/samples/wbxml/emn-002.wbxml
 t/samples/wbxml/emn-003.wbxml

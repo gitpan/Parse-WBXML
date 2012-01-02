@@ -3,11 +3,12 @@ package Parse::WBXML;
 use strict;
 use warnings;
 use parent qw(Mixin::Event::Dispatch);
+use Try::Tiny;
 
 use I18N::Charset qw(mib_to_charset_name);
 use Encode ();
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 =head1 NAME
 
@@ -15,7 +16,7 @@ Parse::WBXML - event-driven support for the generation and parsing of WBXML docu
 
 =head1 VERSION
 
-version 0.001
+version 0.002
 
 =head1 SYNOPSIS
 
@@ -80,7 +81,8 @@ use constant {
 	TOKEN_LITERAL_AC	=> 0xC4,
 };
 
-# From WAP-192-WBXML-20010725-a table 5 ("Public Identifiers")
+# From WAP-192-WBXML-20010725-a table 5 ("Public Identifiers") and
+# http://www.openmobilealliance.org/tech/omna/omna-wbxml-public-docid.aspx
 my %public_id = (
 	0 => 'String table index',
 	1 => 'Unknown',
@@ -96,6 +98,17 @@ my %public_id = (
 	11 => "-//WAPFORUM//DTD PROV 1.0//EN",
 	12 => "-//WAPFORUM//DTD WTA-WML 1.2//EN",
 	13 => "-//WAPFORUM//DTD CHANNEL 1.2//EN",
+	14 => "-//OMA//DTD DRMREL 1.0//EN",
+	15 => "-//WIRELESSVILLAGE//DTD CSP 1.0//EN",
+	16 => "-//WIRELESSVILLAGE//DTD CSP 1.1//EN",
+	17 => "-//OMA//DTD WV-CSP 1.2//EN",
+	18 => "-//OMA//DTD IMPS-CSP 1.3//EN",
+	19 => "-//OMA//DRM 2.1//EN",
+	20 => "-//OMA//SRM 1.0//EN",
+	21 => "-//OMA//DCD 1.0//EN",
+	22 => "-//OMA//DTD DS-DataObjectEmail 1.2//EN",
+	23 => "-//OMA//DTD DS-DataObjectFolder 1.2//EN",
+	24 => "-//OMA//DTD DS-DataObjectFile 1.2//EN",
 );
 
 # From a myriad of OMA specs, and the wbrules.xml file in WAP-wbxml, haven't
@@ -1221,6 +1234,46 @@ my %ns = (
 		attrvalue => {
 		},
 	},
+	# From http://www.openmobilealliance.org/technical/release_program/docs/DRM/V1_0-20040625-A/OMA-Download-DRMREL-V1_0-20040615-A.pdf
+	"-//OMA//DTD DRMREL 1.0//EN" => {
+		tag => {
+			0 => {
+				5 => q{o-ex:rights},
+				6 => q{o-ex:context},
+				7 => q{o-dd:version},
+				8 => q{o-dd:uid},
+				9 => q{o-ex:agreement},
+				10 => q{o-ex:asset},
+				11 => q{ds:KeyInfo},
+				12 => q{ds:KeyValue},
+				13 => q{o-ex:permission},
+				14 => q{o-dd:play},
+				15 => q{o-dd:display},
+				16 => q{o-dd:execute},
+				17 => q{o-dd:print},
+				18 => q{o-ex:constraint},
+				19 => q{o-dd:count},
+				20 => q{o-dd:datetime},
+				21 => q{o-dd:start},
+				22 => q{o-dd:end},
+				23 => q{o-dd:interval},
+			},
+		},
+		attrstart => {
+			0 => {
+				5 => { name => q{xmlns:o-ex}, prefix => q{} },
+				6 => { name => q{xmlns:o-dd}, prefix => q{} },
+				7 => { name => q{xmlns:ds}, prefix => q{} },
+			},
+		},
+		attrvalue => {
+			0 => {
+				133 => q{http://odrl.net/1.1/ODRL-EX},
+				134 => q{http://odrl.net/1.1/ODRL-DD},
+				135 => q{http://www.w3.org/2000/09/xmldsig#/},
+			},
+		},
+	},
 );
 
 =head1 ACCESSOR METHODS
@@ -1268,7 +1321,9 @@ Constructor. Ignores everything you give it.
 
 sub new {
 	my $class = shift;
-	my $self = bless { queue => [] }, $class;
+	my $self = bless { queue => [], element => [] }, $class;
+
+	$self->queue_start;
 
 # We apply these via handlers since we always want them to run first.
 	$self->add_handler_for_event(
@@ -1282,6 +1337,7 @@ sub new {
 		publicid => sub {
 			my ($self, $publicid) = @_;
 			my $type = $public_id{$publicid};
+			die "Unknown type for $publicid" unless defined $type;
 			$self->{ns} = $ns{$type};
 			$self->{publicid} = $type;
 			$self;
@@ -1304,7 +1360,8 @@ Convert multi-byte sequence to an integer value.
 sub mb_to_int {
 	my $self = shift;
 	my $buffref = shift;
-	return unless $$buffref =~ s/^([\x80-\xFF]*[\x00-\x7F])//;
+	my $count = shift || 0;
+	return unless $$buffref =~ s/^.{$count}([\x80-\xFF]*[\x00-\x7F])//s;
 
 	my $v = 0;
 	$v = ($v << 7) + (ord($_) & 0x7F) for split //, $1;
@@ -1345,7 +1402,6 @@ to be processed.
 sub parse {
 	my $self = shift;
 	my $buffref = shift;
-	$self->queue_start unless @{$self->{queue}};
 	$self->process_queue($buffref);
 }
 
@@ -1499,8 +1555,10 @@ sub parse_strtbl_length {
 	return unless defined $rslt;
 
 	$self->mark_item_complete;
+	$self->{strtbl_length} = $rslt;
+	$self->{strtbl} = '';
 	$self->invoke_event(strtbl_length => $rslt);
-	$self->push_queued(qw(strtbl_data) x $rslt) if $rslt;
+	$self->push_queued(qw(strtbl_data)) if $rslt;
 	return $self;
 }
 
@@ -1510,10 +1568,13 @@ sub parse_strtbl_length {
 
 sub parse_strtbl_data {
 	my ($self, $buffref) = @_;
-	return unless length $$buffref;
-	my ($byte) = unpack 'C1', substr $$buffref, 0, 1, '';
+	return unless length $$buffref >= $self->{strtbl_length};
+	my ($bytes) = substr $$buffref, 0, $self->{strtbl_length}, '';
+
+	# don't forget to decode...
+	$self->{strtbl} = join "\0", map $self->decode_string($_), split /\0/, $bytes;
 	$self->mark_item_complete;
-	$self->invoke_event(strtbl => $byte);
+	$self->invoke_event(strtbl => $self->{strtbl});
 	return $self;
 }
 
@@ -1557,6 +1618,12 @@ sub parse_attribute {
 		substr $$buffref, 0, 1, '';
 		$self->mark_item_complete;
 		$self->invoke_event(end_attributes => );
+		$self->invoke_event(start_element => $self->{element}[-1]);
+		if($self->{has_content}) {
+			$self->push_queued(qw(content));
+		} else {
+			$self->invoke_event(end_element => pop @{ $self->{element} });
+		}
 		return $self;
 	}
 
@@ -1564,12 +1631,11 @@ sub parse_attribute {
 		die "Switching page\n";
 	}
 
-	$self->mark_item_complete;
-
 	if(defined(my $start = $self->attrstart_from_id(ord($v)))) {
 		substr $$buffref, 0, 1, '';
 		$self->{attribute_value} = $start->{prefix};
 		$self->{attribute_name} = $start->{name};
+		$self->mark_item_complete;
 		$self->push_queued(qw(attrvalue));
 		return $self;
 	} elsif(ord($v) == TOKEN_LITERAL) {
@@ -1601,22 +1667,25 @@ sub parse_attrvalue {
 	}
 
 	if(ord($v) == TOKEN_STR_I) {
-		return unless substr($$buffref, 1) =~ /\0/;
-		substr $$buffref, 0, 1, '';
-		$$buffref =~ s/^(.*)\0//;
-		my $str = $self->decode_string($1);
+		return unless defined(my $str = $self->termstr($buffref, 1));
 		$self->{attribute_value} .= $str;
 		return $self;
-	}
-	if(ord($v) == TOKEN_STR_T) {
+	} elsif(ord($v) == TOKEN_STR_T) {
 		die "Table ref!";
-	}
+	} elsif(ord($v) == TOKEN_OPAQUE) {
+		return unless defined(my $len = $self->mb_to_int($buffref, 1));
+
+		my $str = substr $$buffref, 0, $len, '';
+		$self->{attribute_value} .= $self->decode_string($str);
+		return $self;
+	} 
 	if(defined(my $start = $self->attrvalue_from_id(ord($v)))) {
 		$self->{attribute_value} .= $start;
 		substr $$buffref, 0, 1, '';
 		return $self;
 	}
 	$self->invoke_event(attribute => $self->{attribute_name}, $self->{attribute_value});
+	$self->{element}[-1]{Attributes}{$self->{attribute_name}} = $self->{attribute_value};
 	$self->mark_item_complete;
 	$self->push_queued(qw(attribute));
 	$self;
@@ -1631,38 +1700,137 @@ sub parse_element {
 	return unless length $$buffref;
 
 	my $v = substr $$buffref, 0, 1;
+	my $ord = ord $v;
 
 # ([switchPage] stag)
-	if(ord($v) == TOKEN_SWITCH_PAGE && length $$buffref > 2) {
+	if($ord == TOKEN_SWITCH_PAGE && length $$buffref > 2) {
 		die "switch page";
 		my $v = substr $$buffref, 0, 1;
 	}
 
-	if(grep ord($v) == $_, TOKEN_LITERAL, TOKEN_LITERAL_A, TOKEN_LITERAL_C, TOKEN_LITERAL_AC) {
+	if($ord == TOKEN_LITERAL) {
+	# Some literal thing from the string table
 		die "Have LITERAL\n";
+	} elsif($ord == TOKEN_LITERAL_A) {
+	# Unknown tag, with attributes and no content
+		die "Have LITERAL attrib\n";
+	} elsif($ord == TOKEN_LITERAL_C) {
+	# Unknown tag, with content and no attributes
+		# Defer until we get the full index
+		my $idx = $self->mb_to_int($buffref, 1);
+		return unless defined $idx;
+
+		my $tag = substr $self->{strtbl}, $idx, index $self->{strtbl}, "\0", $idx;
+		$self->mark_item_complete;
+		warn "literal C";
+		$self->{has_content} = 1;
+		$self->{has_attributes} = 0;
+		$self->push_queued(qw(content));
+		die "No tag??" unless defined $tag && length $tag;
+		warn "Tag was $tag";
+		push @{ $self->{element} }, {
+			Name => $tag,
+			LocalName => $tag,
+			Attributes => { },
+		};
+		$self->invoke_event(start_element => $self->{element}[-1]);
+		return $self;
+	} elsif($ord == TOKEN_LITERAL_AC) {
+		die "Have LITERAL attrib+content\n";
 	} else {
 		my $tag_id = ord($v) & 0x3F;
 		substr $$buffref, 0, 1, '';
 		my $tag = $self->{ns}{tag}{$self->codepage}{$tag_id};
+		die "Tag $tag_id is not defined for " . $self->publicid . " in codepage " . $self->codepage unless defined $tag;
+
+		# Drop us from the stack...
 		$self->mark_item_complete;
+
+		# ... and queue up content and/or attributes as appropriate
+		if(ord($v) & 0x40) {
+			$self->{has_content} = 1;
+			$self->push_queued(qw(content));
+		} else {
+			$self->{has_content} = 0;
+		}
+
 		if(ord($v) & 0x80) {
 			$self->{has_attributes} = 1;
-			$self->push_queued(qw(attribute));
-		} else {
-			$self->{has_attributes} = 0;
-			$self->invoke_event(start_element => {
+			push @{ $self->{element} }, {
 				Name => $tag,
 				LocalName => $tag,
 				Attributes => { },
-			});
+			};
+			$self->push_queued(qw(attribute));
+		} else {
+			$self->{has_attributes} = 0;
+			die "No tag??" unless defined $tag && length $tag;
+			push @{ $self->{element} }, {
+				Name => $tag,
+				LocalName => $tag,
+				Attributes => { },
+			};
+			$self->invoke_event(start_element => $self->{element}[-1]);
+			$self->invoke_event(end_element => pop @{ $self->{element} }) unless $self->{has_content};
 		}
-		if(ord($v) & 0x40) {
-			$self->push_queued(qw(content));
-		}
+
 		$self->invoke_event(element => $tag);
 	}
 
 	$self;
+}
+
+sub termstr {
+	my ($self, $buffref, $idx) = @_;
+	$idx ||= 0;
+	return unless (my $end = index $$buffref, "\0", $idx) >= 0;
+
+	# Account for initial offset
+	$end -= $idx;
+
+	# Drop prefix
+	substr $$buffref, 0, $idx, '';
+
+	# Extract our string without including the terminator
+	my $str = substr $$buffref, 0, $end, '';
+
+	# then drop the terminator as well
+	substr $$buffref, 0, length("\0"), '';
+
+	# make sure we decode from whatever the original charset was
+	return $self->decode_string($str);
+}
+
+sub parse_content {
+	my ($self, $buffref) = @_;
+	return unless length $$buffref;
+
+	my $v = substr $$buffref, 0, 1;
+	my $ord = ord $v;
+	if($ord == TOKEN_STR_I) {
+		return unless defined(my $str = $self->termstr($buffref, 1));
+		$self->invoke_event(characters => { Data => $str });
+	} elsif($ord == TOKEN_STR_T) {
+		die "string from strtbl";
+	} elsif(grep $ord == $_, TOKEN_EXT_I_0, TOKEN_EXT_I_1, TOKEN_EXT_I_2) {
+		die "Inline extension";
+	} elsif(grep $ord == $_, TOKEN_EXT_T_0, TOKEN_EXT_T_1, TOKEN_EXT_T_2) {
+		die "strtbl extension";
+	} elsif(grep $ord == $_, TOKEN_EXT_0, TOKEN_EXT_1, TOKEN_EXT_2) {
+		die "extension";
+	} elsif($ord == TOKEN_ENTITY) {
+		die "entity";
+	} elsif($ord == TOKEN_PI) {
+		die "PI";
+	} elsif($ord == TOKEN_OPAQUE) {
+		die "opaque";
+	} elsif($ord == TOKEN_END) {
+		substr $$buffref, 0, 1, '';
+		$self->mark_item_complete;
+		$self->invoke_event(end_element => pop @{ $self->{element} });
+	} else {
+		$self->push_queued(qw(element));
+	}
 }
 
 =head2 tag_from_id
@@ -1693,6 +1861,72 @@ sub attrvalue_from_id {
 	my $self = shift;
 	my $id = shift;
 	$self->{ns}{attrvalue}{$self->codepage}{$id}
+}
+
+sub dump_from_buffer {
+	my $self = shift;
+	my $buffer = shift;
+	my $out = '';
+	try {
+		die "Did not have header" unless length $buffer >= 4;
+		$self->add_handler_for_event(
+			version	=> sub {
+				my ($self, $version) = @_;
+				$out .= "Version raw [$version] parsed as [" . $self->version . "]\n";
+				0;
+			},
+			publicid => sub {
+				my ($self, $publicid) = @_;
+				$out .= "Public ID raw [$publicid] parsed as [" . $self->publicid . "]\n";
+				0;
+			},
+			charset => sub {
+				my ($self, $charset) = @_;
+				$out .= "Charset raw [$charset] parsed as [" . $self->charset . "]\n";
+				0;
+			},
+			strtbl_length => sub {
+				my ($self, $len) = @_;
+				$out .= "String table contains [$len] entries\n";
+				0;
+			},
+			element => sub {
+				my ($self, $tag) = @_;
+				$out .= "Element [$tag]\n";
+				$self;
+			},
+			strtbl_data => sub {
+				my ($self, $str) = @_;
+				$out .= " string [$_]\n" for split /\0/, $str;
+				0;
+			},
+			start_element => sub {
+				my ($self, $el) = @_;
+				$out .= "Element start: [" . $el->{Name} . "], " . @{$self->{element}} . " deep\n";
+				for my $k (sort keys %{$el->{attributes}}) {
+					my $v = $el->{attributes}{$k};
+					$out .= " attrib $k => $v\n";
+				}
+				$self;
+			},
+			end_element => sub {
+				my ($self, $el) = @_;
+				$out .= "Element end:   [" . $el->{Name} . "], " . @{$self->{element}} . " deep\n";
+				$self;
+			},
+			characters => sub {
+				my ($self, $data) = @_;
+				$out .= " character data: [" . $data->{Data} . "]\n";
+				$self;
+			},
+		);
+		$self->parse(\(my $data = substr $buffer, 0, 4, ''));
+		die "Header parse did not extract everything" if length $data;
+		$self->parse(\$buffer);
+	} catch {
+		die "Had error [$_] while parsing data, result so far is\n$out";
+	};
+	$out;
 }
 
 1;

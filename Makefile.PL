@@ -22,9 +22,10 @@ my %WriteMakefileArgs = (
   "PREREQ_PM" => {
     "I18N::Charset" => "1.401",
     "Mixin::Event::Dispatch" => "0.003",
+    "Try::Tiny" => 0,
     "parent" => 0
   },
-  "VERSION" => "0.001",
+  "VERSION" => "0.002",
   "test" => {
     "TESTS" => "t/*.t"
   }
