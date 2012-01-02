@@ -11,6 +11,7 @@ t/00-pod.t
 t/00-use.t
 t/mb_encoding.t
 t/parse.t
+t/samples.t
 t/samples/wbxml/emn-001.wbxml
 t/samples/wbxml/emn-002.wbxml
 t/samples/wbxml/emn-003.wbxml

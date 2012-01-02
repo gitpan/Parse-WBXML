@@ -8,7 +8,7 @@ use Try::Tiny;
 use I18N::Charset qw(mib_to_charset_name);
 use Encode ();
 
-our $VERSION = '0.003';
+our $VERSION = '0.004';
 
 =head1 NAME
 
@@ -16,7 +16,7 @@ Parse::WBXML - event-driven support for the generation and parsing of WBXML docu
 
 =head1 VERSION
 
-version 0.003
+version 0.004
 
 =head1 SYNOPSIS
 
@@ -110,6 +110,7 @@ my %public_id = (
 	23 => "-//OMA//DTD DS-DataObjectFolder 1.2//EN",
 	24 => "-//OMA//DTD DS-DataObjectFile 1.2//EN",
 	0x0FD3 => "-//SYNCML//DTD SyncML 1.1//EN",
+	0x0FD4 => "-//SYNCML//DTD DevInf 1.1//EN",
 );
 
 # From a myriad of OMA specs, and the wbrules.xml file in WAP-wbxml, haven't
@@ -1365,6 +1366,58 @@ my %ns = (
 			},
 		},
 	},
+	"-//SYNCML//DTD DevInf 1.1//EN" => {
+		tag => {
+			0 => {
+				5 => q{CTCap},
+				6 => q{CTType},
+				7 => q{DataStore},
+				8 => q{DataType},
+				9 => q{DevID},
+				10 => q{DevInf},
+				11 => q{DevTyp},
+				12 => q{DisplayName},
+				13 => q{DSMem},
+				14 => q{Ext},
+				15 => q{FwV},
+				16 => q{HwV},
+				17 => q{Man},
+				18 => q{MaxGUIDSize},
+				19 => q{MaxID},
+				20 => q{MaxMem},
+				21 => q{Mod},
+				22 => q{OEM},
+				23 => q{ParamName},
+				24 => q{PropName},
+				25 => q{Rx},
+				26 => q{Rx-Pref},
+				27 => q{SharedMem},
+				28 => q{Size},
+				29 => q{SourceRef},
+				30 => q{SwV},
+				31 => q{SyncCap},
+				32 => q{SyncType},
+				33 => q{Tx},
+				34 => q{Tx-Pref},
+				35 => q{ValEnum},
+				36 => q{VerCT},
+				37 => q{VerDTD},
+				38 => q{Xnam},
+				39 => q{Xval},
+				40 => q{UTC},
+				41 => q{SupportNumberOfChanges},
+				42 => q{SupportLargeObjs},
+			},
+		},
+		attrstart => {
+			0 => {
+			},
+		},
+		attrvalue => {
+			0 => {
+			},
+		},
+	},
 );
 
 =head1 ACCESSOR METHODS
@@ -1732,7 +1785,8 @@ sub parse_attribute {
 	} elsif(ord($v) == TOKEN_LITERAL) {
 		die 'literal';
 	}
-	die "something else: " . $self->as_hex($$buffref);
+	die "Unexpected data found";
+#	die "something else: " . $self->as_hex($$buffref);
 	$self;
 }
 

@@ -1,5 +1,10 @@
 Revision history for Parse-WBXML
 
+0.004     2012-01-02 09:13:04 Europe/London
+	Support DevInf 1.1, and a test to go through the samples/wbxml/*.wbxml
+	files to check whether we can extract the basic metadata (still need tests
+	for XML->WBXML->XML roundtrip handling)
+
 0.003     2012-01-02 08:55:04 Europe/London
 	SyncML 1.1 DTD support, and handle strtable lookups for character data.
 
