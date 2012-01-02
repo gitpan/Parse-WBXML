@@ -8,7 +8,7 @@ use Try::Tiny;
 use I18N::Charset qw(mib_to_charset_name);
 use Encode ();
 
-our $VERSION = '0.002';
+our $VERSION = '0.003';
 
 =head1 NAME
 
@@ -16,7 +16,7 @@ Parse::WBXML - event-driven support for the generation and parsing of WBXML docu
 
 =head1 VERSION
 
-version 0.002
+version 0.003
 
 =head1 SYNOPSIS
 
@@ -97,7 +97,7 @@ my %public_id = (
 	10 => "-//WAPFORUM//DTD WML 1.3//EN",
 	11 => "-//WAPFORUM//DTD PROV 1.0//EN",
 	12 => "-//WAPFORUM//DTD WTA-WML 1.2//EN",
-	13 => "-//WAPFORUM//DTD CHANNEL 1.2//EN",
+	13 => "-//WAPFORUM//DTD EMN 1.0//EN",
 	14 => "-//OMA//DTD DRMREL 1.0//EN",
 	15 => "-//WIRELESSVILLAGE//DTD CSP 1.0//EN",
 	16 => "-//WIRELESSVILLAGE//DTD CSP 1.1//EN",
@@ -109,6 +109,7 @@ my %public_id = (
 	22 => "-//OMA//DTD DS-DataObjectEmail 1.2//EN",
 	23 => "-//OMA//DTD DS-DataObjectFolder 1.2//EN",
 	24 => "-//OMA//DTD DS-DataObjectFile 1.2//EN",
+	0x0FD3 => "-//SYNCML//DTD SyncML 1.1//EN",
 );
 
 # From a myriad of OMA specs, and the wbrules.xml file in WAP-wbxml, haven't
@@ -1274,6 +1275,96 @@ my %ns = (
 			},
 		},
 	},
+	"-//WAPFORUM//DTD EMN 1.0//EN" => {
+		tag => {
+			0 => {
+				5 => q{emn},
+			},
+		},
+		attrstart => {
+			0 => {
+				5 => { name => q{timestamp}, prefix => q{} },
+				6 => { name => q{mailbox}, prefix => q{} },
+				7 => { name => q{mailbox}, prefix => q{mailat:} },
+				8 => { name => q{mailbox}, prefix => q{pop://} },
+				9 => { name => q{mailbox}, prefix => q{imap://} },
+				10 => { name => q{mailbox}, prefix => q{http://} },
+				11 => { name => q{mailbox}, prefix => q{http://www.} },
+				12 => { name => q{mailbox}, prefix => q{https://} },
+				13 => { name => q{mailbox}, prefix => q{https://www.} },
+			},
+		},
+		attrvalue => {
+			0 => {
+				133 => q{.com},
+				134 => q{.edu},
+				135 => q{.net},
+				136 => q{.org},
+			},
+		},
+	},
+	# From http://www.syncml.org/docs/syncml_represent_v101_20010615.pdf (describes
+	# 1.0.1 which is mostly the same as 1.1)
+	"-//SYNCML//DTD SyncML 1.1//EN" => {
+		tag => {
+			0 => {
+				5 => q{Add},
+				6 => q{Alert},
+				7 => q{Archive},
+				8 => q{Atomic},
+				9 => q{Chal},
+				10 => q{Cmd},
+				11 => q{CmdID},
+				12 => q{CmdRef},
+				13 => q{Copy},
+				14 => q{Cred},
+				15 => q{Data},
+				16 => q{Delete},
+				17 => q{Exec},
+				18 => q{Final},
+				19 => q{Get},
+				20 => q{Item},
+				21 => q{Lang},
+				22 => q{LocName},
+				23 => q{LocURI},
+				24 => q{Map},
+				25 => q{MapItem},
+				26 => q{Meta},
+				27 => q{MsgID},
+				28 => q{MsgRef},
+				29 => q{NoResp},
+				30 => q{NoResults},
+				31 => q{Put},
+				32 => q{Replace},
+				33 => q{RespURI},
+				34 => q{Results},
+				35 => q{Search},
+				36 => q{Sequence},
+				37 => q{SessionID},
+				38 => q{SftDel},
+				39 => q{Source},
+				40 => q{SourceRef},
+				41 => q{Status},
+				42 => q{Sync},
+				43 => q{SyncBody},
+				44 => q{SyncHdr},
+				45 => q{SyncML},
+				46 => q{Target},
+				47 => q{TargetRef},
+				# 5 => q{rsrvd},
+				49 => q{VerDTD},
+				50 => q{VerProto},
+			},
+		},
+		attrstart => {
+			0 => {
+			},
+		},
+		attrvalue => {
+			0 => {
+			},
+		},
+	},
 );
 
 =head1 ACCESSOR METHODS
@@ -1572,7 +1663,7 @@ sub parse_strtbl_data {
 	my ($bytes) = substr $$buffref, 0, $self->{strtbl_length}, '';
 
 	# don't forget to decode...
-	$self->{strtbl} = join "\0", map $self->decode_string($_), split /\0/, $bytes;
+	$self->{strtbl} = join("\0", map $self->decode_string($_), split /\0/, $bytes) . "\0";
 	$self->mark_item_complete;
 	$self->invoke_event(strtbl => $self->{strtbl});
 	return $self;
@@ -1808,10 +1899,13 @@ sub parse_content {
 	my $v = substr $$buffref, 0, 1;
 	my $ord = ord $v;
 	if($ord == TOKEN_STR_I) {
-		return unless defined(my $str = $self->termstr($buffref, 1));
-		$self->invoke_event(characters => { Data => $str });
+		return unless defined(my $txt = $self->termstr($buffref, 1));
+		$self->invoke_event(characters => { Data => $txt });
 	} elsif($ord == TOKEN_STR_T) {
-		die "string from strtbl";
+		return unless defined (my $idx = $self->mb_to_int($buffref, 1));
+
+		my $txt = substr $self->{strtbl}, $idx, index($self->{strtbl}, "\0", $idx) - $idx;
+		$self->invoke_event(characters => { Data => $txt });
 	} elsif(grep $ord == $_, TOKEN_EXT_I_0, TOKEN_EXT_I_1, TOKEN_EXT_I_2) {
 		die "Inline extension";
 	} elsif(grep $ord == $_, TOKEN_EXT_T_0, TOKEN_EXT_T_1, TOKEN_EXT_T_2) {
@@ -1863,6 +1957,12 @@ sub attrvalue_from_id {
 	$self->{ns}{attrvalue}{$self->codepage}{$id}
 }
 
+=head2 dump_from_buffer
+
+Given a buffer of data, will report as much information as we can extract.
+
+=cut
+
 sub dump_from_buffer {
 	my $self = shift;
 	my $buffer = shift;
@@ -1903,8 +2003,8 @@ sub dump_from_buffer {
 			start_element => sub {
 				my ($self, $el) = @_;
 				$out .= "Element start: [" . $el->{Name} . "], " . @{$self->{element}} . " deep\n";
-				for my $k (sort keys %{$el->{attributes}}) {
-					my $v = $el->{attributes}{$k};
+				for my $k (sort keys %{$el->{Attributes}}) {
+					my $v = $el->{Attributes}{$k};
 					$out .= " attrib $k => $v\n";
 				}
 				$self;
