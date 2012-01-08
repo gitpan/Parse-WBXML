@@ -11,7 +11,11 @@ use ExtUtils::MakeMaker 6.30;
 my %WriteMakefileArgs = (
   "ABSTRACT" => "Support for WBXML as defined by the Open Mobile Alliance specs",
   "AUTHOR" => "Tom Molesworth <cpan\@entitymodel.com>",
-  "BUILD_REQUIRES" => {},
+  "BUILD_REQUIRES" => {
+    "Dir::Self" => 0,
+    "File::Slurp" => 0,
+    "Test::More" => "0.94"
+  },
   "CONFIGURE_REQUIRES" => {
     "ExtUtils::MakeMaker" => "6.30"
   },
@@ -25,7 +29,7 @@ my %WriteMakefileArgs = (
     "Try::Tiny" => 0,
     "parent" => 0
   },
-  "VERSION" => "0.004",
+  "VERSION" => "0.005",
   "test" => {
     "TESTS" => "t/*.t"
   }

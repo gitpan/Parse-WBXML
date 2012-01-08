@@ -8,7 +8,7 @@ use Try::Tiny;
 use I18N::Charset qw(mib_to_charset_name);
 use Encode ();
 
-our $VERSION = '0.004';
+our $VERSION = '0.005';
 
 =head1 NAME
 
@@ -16,7 +16,7 @@ Parse::WBXML - event-driven support for the generation and parsing of WBXML docu
 
 =head1 VERSION
 
-version 0.004
+version 0.005
 
 =head1 SYNOPSIS
 
@@ -891,10 +891,16 @@ my %ns = (
 			},
 		},
 	},
+	# From http://www.openmobilealliance.org/tech/affiliates/wap/wap-183-provcont-20010724-a.pdf
+	# and libwbxml2
 	"-//WAPFORUM//DTD PROV 1.0//EN" => {
 		tag => {
 			0 => {
 				5 => q{wap-provisioningdoc},
+				6 => q{characteristic},
+				7 => q{parm},
+			},
+			1 => {
 				6 => q{characteristic},
 				7 => q{parm},
 			},
@@ -957,8 +963,18 @@ my %ns = (
 				58 => { name => q{name}, prefix => q{TRANSFER-DELAY} },
 				59 => { name => q{name}, prefix => q{GUARANTEED-BITRATE-UPLINK} },
 				60 => { name => q{name}, prefix => q{GUARANTEED-BITRATE-DNLINK} },
+				61 => { name => q{name}, prefix => q{PXADDR-FQDN} },
+				62 => { name => q{name}, prefix => q{PPGAUTH-TYPE} },
 				69 => { name => q{version}, prefix => q{} },
 				70 => { name => q{version}, prefix => q{1.0} },
+				71 => { name => q{name}, prefix => q{PULLENABLED} },
+				72 => { name => q{name}, prefix => q{DNS-ADDR} },
+				73 => { name => q{name}, prefix => q{MAX-NUM-RETRY} },
+				74 => { name => q{name}, prefix => q{FIRST-RETRY-TIMEOUT} },
+				75 => { name => q{name}, prefix => q{REREG-THRESHOLD} },
+				76 => { name => q{name}, prefix => q{T-BIT} },
+				78 => { name => q{name}, prefix => q{AUTH-ENTITY} },
+				79 => { name => q{name}, prefix => q{SPI} },
 				80 => { name => q{type}, prefix => q{} },
 				81 => { name => q{type}, prefix => q{PXLOGICAL} },
 				82 => { name => q{type}, prefix => q{PXPHYSICAL} },
@@ -970,6 +986,24 @@ my %ns = (
 				88 => { name => q{type}, prefix => q{CLIENTIDENTITY} },
 				89 => { name => q{type}, prefix => q{PXAUTHINFO} },
 				90 => { name => q{type}, prefix => q{NAPAUTHINFO} },
+				91 => { name => q{type}, prefix => q{ACCESS} },
+			},
+			1 => {
+				5 => { name => q{name}, prefix => q{} },
+				6 => { name => q{value}, prefix => q{} },
+				7 => { name => q{name}, prefix => q{NAME} },
+				20 => { name => q{name}, prefix => q{INTERNET} },
+				28 => { name => q{name}, prefix => q{STARTPAGE} },
+				34 => { name => q{name}, prefix => q{TO-NAPID} },
+				35 => { name => q{name}, prefix => q{PORTNBR} },
+				36 => { name => q{name}, prefix => q{SERVICE} },
+				80 => { name => q{type}, prefix => q{} },
+				83 => { name => q{type}, prefix => q{PORT} },
+				85 => { name => q{type}, prefix => q{APPLICATION} },
+				86 => { name => q{type}, prefix => q{APPADDR} },
+				87 => { name => q{type}, prefix => q{APPAUTH} },
+				88 => { name => q{type}, prefix => q{CLIENTIDENTITY} },
+				89 => { name => q{type}, prefix => q{RESOURCE} },
 			},
 		},
 		attrvalue => {
@@ -1016,6 +1050,8 @@ my %ns = (
 				182 => q{TETRA-PACKET},
 				183 => q{ANSI-136-GHOST},
 				184 => q{MOBITEX-MPAK},
+				185 => q{CDMA2000-1X-SIMPLE-IP},
+				186 => q{CDMA2000-1X-MOBILE-IP},
 				197 => q{AUTOBAUDING},
 				202 => q{CL-WSP},
 				203 => q{CO-WSP},
@@ -1352,7 +1388,7 @@ my %ns = (
 				45 => q{SyncML},
 				46 => q{Target},
 				47 => q{TargetRef},
-				# 5 => q{rsrvd},
+				# 48 => q{rsrvd}, # marked as reserved for future expansion in the spec
 				49 => q{VerDTD},
 				50 => q{VerProto},
 			},
@@ -1366,6 +1402,7 @@ my %ns = (
 			},
 		},
 	},
+	# From http://www.openmobilealliance.org/technical/release_program/docs/DS/V1_1_2-20040721-A/OMA-SyncML-DevInfo-V1_1_2-20040721-A.pdf
 	"-//SYNCML//DTD DevInf 1.1//EN" => {
 		tag => {
 			0 => {
@@ -1447,13 +1484,23 @@ Returns current version as a string, e.g. "1.3".
 
 sub version { shift->{version} }
 
-=head2 codepage
+=head2 attribute_codepage
 
-Returns current codepage.
+Returns current attribute codepage. This is the table used for all
+document-specific attribute tag lookups, and defaults to 0.
 
 =cut
 
-sub codepage { 0 }
+sub attribute_codepage { shift->{attribute_codepage} ||= 0 }
+
+=head2 tag_codepage
+
+Returns current tag codepage. This is the table used for all
+document-specific element tag lookups, and defaults to 0.
+
+=cut
+
+sub tag_codepage { shift->{tag_codepage} ||= 0 }
 
 =head1 METHODS
 
@@ -1570,12 +1617,15 @@ to be processed.
 
 =cut
 
+use Data::Dumper;
 sub process_queue {
 	my $self = shift;
 	my $buffref = shift;
 
 	ITEM:
 	while(my $next = $self->next_queued) {
+#		warn "next = $next, top element is " . Dumper $self->{element};
+#		$self->as_hex($$buffref);
 		last ITEM unless $self->parse_item($next, $buffref);
 	}
 }
@@ -1728,8 +1778,12 @@ sub parse_strtbl_data {
 
 sub parse_body {
 	my ($self, $buffref) = @_;
-	$self->mark_item_complete;
-	$self->push_queued(qw(pi element pi));
+	return unless length $$buffref;
+	my $v = ord substr $$buffref, 0, 1;
+
+	die 'PI' if $v == TOKEN_PI;
+
+	$self->push_queued(qw(element pi));
 	return $self;
 }
 
@@ -1740,13 +1794,16 @@ sub parse_body {
 sub parse_pi {
 	my ($self, $buffref) = @_;
 	return unless length $$buffref;
-	my $v = substr $$buffref, 0, 1;
-	if(ord($v) == TOKEN_PI) {
+	my $v = ord substr $$buffref, 0, 1;
+
+	if($v == TOKEN_PI) {
+		die 'PI';
 		substr $$buffref, 0, 1, '';
+		return $self;
 	} else {
 		$self->mark_item_complete;
+		return $self;
 	}
-	$self;
 }
 
 =head2 parse_attribute
@@ -1757,9 +1814,13 @@ sub parse_attribute {
 	my ($self, $buffref) = @_;
 	return unless length $$buffref;
 
-	my $v = substr $$buffref, 0, 1;
-	if(ord($v) == TOKEN_END) {
+	my $v = ord substr $$buffref, 0, 1;
+
+	# No more attributes, move on to content if we have it
+	if($v == TOKEN_END) {
 		substr $$buffref, 0, 1, '';
+		$self->finish_attribute;
+
 		$self->mark_item_complete;
 		$self->invoke_event(end_attributes => );
 		$self->invoke_event(start_element => $self->{element}[-1]);
@@ -1771,23 +1832,58 @@ sub parse_attribute {
 		return $self;
 	}
 
-	if(ord($v) == TOKEN_SWITCH_PAGE && length $$buffref > 2) {
-		die "Switching page\n";
+	# Start a new literal attribute
+	if($v == TOKEN_LITERAL) {
+		my $idx = $self->mb_to_int($buffref, 1);
+		return unless defined $idx;
+
+		# No prefix, literal attribute name
+		die "undef literal?" unless defined(my $name = $self->tag_code_from_literal($idx));
+		return $self->start_new_attribute(
+			name => $name,
+			value => '',
+		);
 	}
 
-	if(defined(my $start = $self->attrstart_from_id(ord($v)))) {
-		substr $$buffref, 0, 1, '';
-		$self->{attribute_value} = $start->{prefix};
-		$self->{attribute_name} = $start->{name};
-		$self->mark_item_complete;
-		$self->push_queued(qw(attrvalue));
+	# Try some attribute value parsing
+	if($v == TOKEN_STR_I) {
+		return unless defined(my $str = $self->termstr($buffref, 1));
+		$self->{attribute_value} .= $str;
 		return $self;
-	} elsif(ord($v) == TOKEN_LITERAL) {
-		die 'literal';
 	}
-	die "Unexpected data found";
-#	die "something else: " . $self->as_hex($$buffref);
-	$self;
+
+	if($v == TOKEN_STR_T) {
+		return unless defined (my $idx = $self->mb_to_int($buffref, 1));
+
+		my $txt = substr $self->{strtbl}, $idx, index($self->{strtbl}, "\0", $idx) - $idx;
+		$self->{attribute_value} .= $txt;
+		return $self;
+	}
+
+	if($v == TOKEN_OPAQUE) {
+		return unless defined(my $len = $self->mb_to_int($buffref, 1));
+
+		my $str = substr $$buffref, 0, $len, '';
+		$self->{attribute_value} .= $self->decode_string($str);
+		return $self;
+	} 
+
+	# We're down to either a start or a value tag from our document namespace, check
+	# for codepage switch request then look 'em up
+	$self->switch_attribute_codepage($buffref) if $self->should_switch_codepage($buffref);
+
+	my $code = $self->next_attribute_item_from_buffer($buffref);
+	return unless defined $code;
+
+	if(ref $code) {
+		return $self->start_new_attribute(
+			name => $code->{name},
+			value => $code->{prefix},
+		);
+	} else {
+		$self->{attribute_value} .= $code;
+		return $self;
+	}
 }
 
 sub as_hex {
@@ -1795,6 +1891,24 @@ sub as_hex {
 	my $data = shift;
 	warn " hex: " . join ' ', map sprintf('%02x', ord($_)), split //, $data;
 	$self;
+}
+
+
+sub finish_attribute {
+	my $self = shift;
+	$self->{element}[-1]{Attributes}{$self->{attribute_name}} = $self->{attribute_value};
+	$self->invoke_event(attribute => $self->{attribute_name}, $self->{attribute_value});
+	undef $self->{attribute_name};
+	return $self;
+}
+
+sub start_new_attribute {
+	my $self = shift;
+	my %args = @_;
+	$self->finish_attribute if defined $self->{attribute_name};
+	$self->{attribute_name} = exists $args{name} ? $args{name} : '';
+	$self->{attribute_value} = exists $args{value} ? $args{value} : '';
+	return $self;
 }
 
 =head2 parse_attrvalue
@@ -1807,9 +1921,7 @@ sub parse_attrvalue {
 	return unless length $$buffref;
 
 	my $v = substr $$buffref, 0, 1;
-	if(ord($v) == TOKEN_SWITCH_PAGE && length $$buffref > 2) {
-		die "Switching page\n";
-	}
+	$self->switch_attribute_codepage($buffref) if $self->should_switch_codepage($buffref);
 
 	if(ord($v) == TOKEN_STR_I) {
 		return unless defined(my $str = $self->termstr($buffref, 1));
@@ -1844,85 +1956,78 @@ sub parse_element {
 	my ($self, $buffref) = @_;
 	return unless length $$buffref;
 
-	my $v = substr $$buffref, 0, 1;
-	my $ord = ord $v;
+	my $v = ord substr $$buffref, 0, 1;
 
-# ([switchPage] stag)
-	if($ord == TOKEN_SWITCH_PAGE && length $$buffref > 2) {
-		die "switch page";
-		my $v = substr $$buffref, 0, 1;
-	}
+	# ([switchPage] stag) - since the former is optional, doesn't matter if we have no stag
+	# to match because we'll hit it next time around
+	$self->switch_tag_codepage($buffref) if $self->should_switch_codepage($buffref);
 
-	if($ord == TOKEN_LITERAL) {
+	if($v == TOKEN_LITERAL) {
 	# Some literal thing from the string table
 		die "Have LITERAL\n";
-	} elsif($ord == TOKEN_LITERAL_A) {
+	} elsif($v == TOKEN_LITERAL_A) {
 	# Unknown tag, with attributes and no content
 		die "Have LITERAL attrib\n";
-	} elsif($ord == TOKEN_LITERAL_C) {
+	} elsif($v == TOKEN_LITERAL_C) {
 	# Unknown tag, with content and no attributes
 		# Defer until we get the full index
 		my $idx = $self->mb_to_int($buffref, 1);
 		return unless defined $idx;
 
-		my $tag = substr $self->{strtbl}, $idx, index $self->{strtbl}, "\0", $idx;
-		$self->mark_item_complete;
-		warn "literal C";
+		my $tag = $self->tag_code_from_literal($idx);
+		# substr $self->{strtbl}, $idx, index $self->{strtbl}, "\0", $idx;
 		$self->{has_content} = 1;
 		$self->{has_attributes} = 0;
-		$self->push_queued(qw(content));
 		die "No tag??" unless defined $tag && length $tag;
-		warn "Tag was $tag";
 		push @{ $self->{element} }, {
 			Name => $tag,
 			LocalName => $tag,
 			Attributes => { },
 		};
+		# we're all done, time for the content handler to deal with the rest
+		$self->mark_item_complete;
+		$self->push_queued(qw(content));
 		$self->invoke_event(start_element => $self->{element}[-1]);
 		return $self;
-	} elsif($ord == TOKEN_LITERAL_AC) {
+	} elsif($v == TOKEN_LITERAL_AC) {
 		die "Have LITERAL attrib+content\n";
-	} else {
-		my $tag_id = ord($v) & 0x3F;
-		substr $$buffref, 0, 1, '';
-		my $tag = $self->{ns}{tag}{$self->codepage}{$tag_id};
-		die "Tag $tag_id is not defined for " . $self->publicid . " in codepage " . $self->codepage unless defined $tag;
-
-		# Drop us from the stack...
-		$self->mark_item_complete;
-
-		# ... and queue up content and/or attributes as appropriate
-		if(ord($v) & 0x40) {
-			$self->{has_content} = 1;
-			$self->push_queued(qw(content));
-		} else {
-			$self->{has_content} = 0;
-		}
-
-		if(ord($v) & 0x80) {
-			$self->{has_attributes} = 1;
-			push @{ $self->{element} }, {
-				Name => $tag,
-				LocalName => $tag,
-				Attributes => { },
-			};
-			$self->push_queued(qw(attribute));
-		} else {
-			$self->{has_attributes} = 0;
-			die "No tag??" unless defined $tag && length $tag;
-			push @{ $self->{element} }, {
-				Name => $tag,
-				LocalName => $tag,
-				Attributes => { },
-			};
-			$self->invoke_event(start_element => $self->{element}[-1]);
-			$self->invoke_event(end_element => pop @{ $self->{element} }) unless $self->{has_content};
-		}
-
-		$self->invoke_event(element => $tag);
 	}
 
-	$self;
+	my $tag_id = $v & 0x3F;
+
+	# Not literal, must be a tag
+	substr $$buffref, 0, 1, '';
+	my $tag = $self->{ns}{tag}{$self->tag_codepage}{$tag_id};
+	die "Tag $tag_id is not defined for " . $self->publicid . " in codepage " . $self->tag_codepage unless defined $tag;
+
+	# Drop us from the stack...
+	$self->mark_item_complete;
+
+	push @{ $self->{element} }, {
+		Name => $tag,
+		LocalName => $tag,
+		Attributes => { },
+	};
+
+	$self->{has_attributes} = $v & 0x80;
+	$self->{has_content} = $v & 0x40;
+
+	# Content queued first because we're in LIFO order
+	if($self->{has_content}) {
+		$self->push_queued(qw(content));
+	} else {
+		$self->invoke_event(end_element => pop @{ $self->{element} }) unless $self->{has_attributes};
+	}
+
+	# Attributes?
+	if($self->{has_attributes}) {
+		$self->push_queued(qw(attribute));
+	} else {
+		$self->invoke_event(start_element => $self->{element}[-1]);
+	}
+
+	$self->invoke_event(element => $tag);
+	return $self;
 }
 
 sub termstr {
@@ -1950,35 +2055,39 @@ sub parse_content {
 	my ($self, $buffref) = @_;
 	return unless length $$buffref;
 
-	my $v = substr $$buffref, 0, 1;
-	my $ord = ord $v;
-	if($ord == TOKEN_STR_I) {
+	my $v = ord substr $$buffref, 0, 1;
+
+	if($v == TOKEN_STR_I) {
 		return unless defined(my $txt = $self->termstr($buffref, 1));
 		$self->invoke_event(characters => { Data => $txt });
-	} elsif($ord == TOKEN_STR_T) {
+		return $self;
+	} elsif($v == TOKEN_STR_T) {
 		return unless defined (my $idx = $self->mb_to_int($buffref, 1));
 
 		my $txt = substr $self->{strtbl}, $idx, index($self->{strtbl}, "\0", $idx) - $idx;
 		$self->invoke_event(characters => { Data => $txt });
-	} elsif(grep $ord == $_, TOKEN_EXT_I_0, TOKEN_EXT_I_1, TOKEN_EXT_I_2) {
+		return $self;
+	} elsif(grep $v == $_, TOKEN_EXT_I_0, TOKEN_EXT_I_1, TOKEN_EXT_I_2) {
 		die "Inline extension";
-	} elsif(grep $ord == $_, TOKEN_EXT_T_0, TOKEN_EXT_T_1, TOKEN_EXT_T_2) {
+	} elsif(grep $v == $_, TOKEN_EXT_T_0, TOKEN_EXT_T_1, TOKEN_EXT_T_2) {
 		die "strtbl extension";
-	} elsif(grep $ord == $_, TOKEN_EXT_0, TOKEN_EXT_1, TOKEN_EXT_2) {
+	} elsif(grep $v == $_, TOKEN_EXT_0, TOKEN_EXT_1, TOKEN_EXT_2) {
 		die "extension";
-	} elsif($ord == TOKEN_ENTITY) {
+	} elsif($v == TOKEN_ENTITY) {
 		die "entity";
-	} elsif($ord == TOKEN_PI) {
+	} elsif($v == TOKEN_PI) {
 		die "PI";
-	} elsif($ord == TOKEN_OPAQUE) {
+	} elsif($v == TOKEN_OPAQUE) {
 		die "opaque";
-	} elsif($ord == TOKEN_END) {
+	} elsif($v == TOKEN_END) {
 		substr $$buffref, 0, 1, '';
 		$self->mark_item_complete;
 		$self->invoke_event(end_element => pop @{ $self->{element} });
-	} else {
-		$self->push_queued(qw(element));
+		return $self;
 	}
+
+	$self->push_queued(qw(element));
+	return $self;
 }
 
 =head2 tag_from_id
@@ -1988,7 +2097,7 @@ sub parse_content {
 sub tag_from_id {
 	my $self = shift;
 	my $id = shift;
-	$self->{ns}{tag}{$self->codepage}{$id}
+	$self->{ns}{tag}{$self->tag_codepage}{$id}
 }
 
 =head2 attrstart_from_id
@@ -1998,7 +2107,7 @@ sub tag_from_id {
 sub attrstart_from_id {
 	my $self = shift;
 	my $id = shift;
-	$self->{ns}{attrstart}{$self->codepage}{$id}
+	$self->{ns}{attrstart}{$self->attribute_codepage}{$id}
 }
 
 =head2 attrvalue_from_id
@@ -2008,7 +2117,44 @@ sub attrstart_from_id {
 sub attrvalue_from_id {
 	my $self = shift;
 	my $id = shift;
-	$self->{ns}{attrvalue}{$self->codepage}{$id}
+	$self->{ns}{attrvalue}{$self->attribute_codepage}{$id}
+}
+
+sub should_switch_codepage {
+	my $self = shift;
+	my $buffref = shift;
+
+	# Need at least 2 bytes
+	return unless length $$buffref >= 2;
+	return unless ord(substr $$buffref, 0, 1) == TOKEN_SWITCH_PAGE;
+	1;
+}
+
+sub codepage_index_from_buffer {
+	my $self = shift;
+	my $buffref = shift;
+	return unless $self->should_switch_codepage($buffref);
+
+	# We want to take both bytes out of the buffer, and use the second
+	# as our new codepage index.
+	my ($v) = reverse split //, substr $$buffref, 0, 2, '';
+	return ord $v;
+}
+
+sub switch_attribute_codepage {
+	my $self = shift;
+	return unless defined(my $v = $self->codepage_index_from_buffer(@_));
+
+	$self->{attribute_codepage} = $v;
+	return 1;
+}
+
+sub switch_tag_codepage {
+	my $self = shift;
+	return unless defined(my $v = $self->codepage_index_from_buffer(@_));
+
+	$self->{tag_codepage} = $v;
+	return 1;
 }
 
 =head2 dump_from_buffer
@@ -2081,6 +2227,68 @@ sub dump_from_buffer {
 		die "Had error [$_] while parsing data, result so far is\n$out";
 	};
 	$out;
+}
+
+=head2 next_tag_code_from_buffer
+
+Extracts the next tag code from the buffer, returning an
+empty list if none found.
+
+=cut
+
+sub next_tag_code_from_buffer {
+	my $self = shift;
+	my $buffref = shift;
+	return unless length $$buffref;
+
+	my $byte = substr $$buffref, 0, 1;
+	my $has_attributes = $byte & 0x80;
+	my $has_content = $byte & 0x40;
+	$byte &= 0x3F;
+
+	if($byte == TOKEN_LITERAL) {
+		return unless defined (my $idx = $self->mb_to_int($buffref, 1));
+		return $self->tag_code_from_literal($idx);
+	}
+
+	substr $$buffref, 0, 1, '';
+	return $byte;
+}
+
+=head2 next_attribute_item_from_buffer
+
+=cut
+
+sub next_attribute_item_from_buffer {
+	my $self = shift;
+	my $buffref = shift;
+
+	my $byte = ord substr $$buffref, 0, 1, '';
+
+	# This is an attribute value, see section 5.8.3 in WAP-192-WBXML-20010725-a
+#	warn "CP = " . $self->attribute_codepage;
+#	warn "byte = $byte\n";
+#	warn Dumper $self->{ns};
+	return $self->{ns}{attrvalue}{$self->attribute_codepage}{$byte} if $byte & 0x80;
+	# ... otherwise a start hashref
+	return $self->{ns}{attrstart}{$self->attribute_codepage}{$byte};
+}
+
+=pod
+
+Get tag
+Process attibutes if any
+Process content if any
+
+
+=cut
+
+sub tag_code_from_literal {
+	my $self = shift;
+	my $idx = shift;
+	return substr $self->{strtbl}, $idx, index($self->{strtbl}, "\0", $idx) - $idx;
+	# old version
+	return substr $self->{strtbl}, $idx, index $self->{strtbl}, "\0", $idx;
 }
 
 1;
